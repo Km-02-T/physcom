@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>IOT RGB Control</title>
+	<meta charset="UTF-8">
+	<link rel="stylesheet" type="text/css" href="bower_components/bootstrap/dist/css/bootstrap.min.css">
+	<link rel="stylesheet" type="text/css" href="bower_components/snackbarjs/dist/snackbar.min.css">
+	<link rel="stylesheet" type="text/css" href="bower_components/titatoggle/dist/titatoggle-dist-min.css">
+	<link rel="stylesheet" type="text/css" href="bower_components/bootstrap-material-design/dist/css/roboto.min.css">
+	<link rel="stylesheet" type="text/css" href="bower_components/bootstrap-material-design/dist/css/ripples.min.css">
+	<link rel="stylesheet" type="text/css" href="bower_components/bootstrap-material-design/dist/css/material-fullpalette.min.css">
+	
+	<style>
+		.color-box {
+			width: 120px; height: 120px; 
+			border-radius: 50%; 
+			margin: 20px auto; 
+			border: 4px solid #ddd;
+			box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+			transition: background-color 0.2s;
+		}
+		.btn-control {
+			width: 80px;
+			font-size: 14px;
+			font-weight: bold;
+			color: white !important;
+			margin: 5px;
+			border-radius: 8px;
+		}
+		.section-title {
+			font-weight: bold;
+			margin-top: 15px;
+		}
+	</style>
+</head>
+<body>
+	<div class="container" style="padding-top: 30px;">
+		<div class="text-center">
+			<h1>RGB Light Control</h1>
+
+			<!-- สถานะการเชื่อมต่อ -->
+			<div style="margin: 15px 0; font-size: 18px;">
+				<div><strong>Broker:</strong> <span id="broker-name">-</span></div>
+				<div><strong>Topic:</strong> <span id="topic-name">-</span></div>
+			</div>
+			<div style="margin: 15px 0;">
+				<span id="connection-status" class="label label-danger" style="font-size: 16px;">Disconnected</span>
+			</div>
+			
+			<button class="btn btn-material-grey-500" id="connect-button">Connect</button>
+			<button class="btn btn-material-grey-700" id="disconnect-button" disabled>Disconnect</button>
+			<hr>
+
+			<!-- กล่องแสดงสีที่กำลังส่งไป -->
+			<div id="color-preview" class="color-box" style="background-color: rgb(0,0,0);"></div>
+			<h4 style="margin-bottom: 30px;">Payload: <span id="rgb-value">0,0,0</span></h4>
+
+			<!-- แผงปุ่มควบคุม R, G, B แบบแยก ON/OFF -->
+			<div class="row">
+				<!-- RED Control -->
+				<div class="col-xs-4">
+					<div class="section-title" style="color: #F44336;">RED</div>
+					<button class="btn btn-control color-btn" data-color="r" data-val="255" style="background-color: #F44336;">ON</button><br>
+					<button class="btn btn-control color-btn" data-color="r" data-val="0" style="background-color: #424242;">OFF</button>
+				</div>
+				
+				<!-- GREEN Control -->
+				<div class="col-xs-4">
+					<div class="section-title" style="color: #4CAF50;">GREEN</div>
+					<button class="btn btn-control color-btn" data-color="g" data-val="255" style="background-color: #4CAF50;">ON</button><br>
+					<button class="btn btn-control color-btn" data-color="g" data-val="0" style="background-color: #424242;">OFF</button>
+				</div>
+				
+				<!-- BLUE Control -->
+				<div class="col-xs-4">
+					<div class="section-title" style="color: #2196F3;">BLUE</div>
+					<button class="btn btn-control color-btn" data-color="b" data-val="255" style="background-color: #2196F3;">ON</button><br>
+					<button class="btn btn-control color-btn" data-color="b" data-val="0" style="background-color: #424242;">OFF</button>
+				</div>
+			</div>
+
+		</div>
+	</div>
+	
+	<script type="text/javascript" src="bower_components/jquery/dist/jquery.min.js"></script>
+	<script src="mqttws31.js" type="text/javascript"></script>
+	<script type="text/javascript" src="bower_components/bootstrap/dist/js/bootstrap.min.js"></script>
+	<script type="text/javascript" src="bower_components/snackbarjs/dist/snackbar.min.js"></script>
+	<script type="text/javascript" src="bower_components/bootstrap-material-design/dist/js/material.min.js"></script>
+	<script type="text/javascript" src="bower_components/bootstrap-material-design/dist/js/ripples.min.js"></script>
+	
+	<script type="text/javascript">
+            $(function() {
+                $.material.init();
+
+                // ตั้งค่า MQTT
+				var MQTTbroker = 'mqtt-dashboard.com';
+				var MQTTport = 8884;
+				var MQTTpublishTopic = 'physcom/68070049';
+
+				$('#broker-name').text(MQTTbroker + ':' + MQTTport);
+				$('#topic-name').text(MQTTpublishTopic);
+
+				var client = new Paho.MQTT.Client(MQTTbroker, MQTTport, "client_rgb_" + parseInt(Math.random() * 1000, 10));
+				var isConnected = false;
+
+				// ตัวแปรเก็บค่าสีปัจจุบัน
+				var currentR = 0;
+				var currentG = 0;
+				var currentB = 0;
+
+				// อัปเดต UI เมื่อเชื่อมต่อ/หลุด
+				function updateConnectionStatus(connected, message) {
+					isConnected = connected;
+					$('#connection-status').text(message || (connected ? 'Connected' : 'Disconnected'))
+						.toggleClass('label-success', connected)
+						.toggleClass('label-danger', !connected);
+					$('#connect-button').prop('disabled', connected);
+					$('#disconnect-button').prop('disabled', !connected);
+				}
+
+				client.onConnectionLost = function (responseObject) {
+					updateConnectionStatus(false, 'Disconnected');
+				};
+
+				$('#connect-button').click(function () {
+					if (!isConnected) {
+						updateConnectionStatus(false, 'Connecting...');
+						client.connect({
+							timeout: 3,
+							onSuccess: function () { updateConnectionStatus(true, 'Connected'); },
+							onFailure: function (msg) { updateConnectionStatus(false, 'Failed'); }
+						});
+					}
+				});
+
+				$('#disconnect-button').click(function () {
+					if (isConnected) {
+						client.disconnect();
+						updateConnectionStatus(false, 'Disconnected');
+					}
+				});
+
+				// ฟังก์ชันส่งข้อมูล MQTT
+				function publishMQTT(payload) {
+					if (!isConnected) {
+						$.snackbar({content: 'กรุณา Connect ก่อนกดปุ่ม'});
+						return;
+					}
+					var message = new Paho.MQTT.Message(payload);
+					message.destinationName = MQTTpublishTopic;
+					client.send(message);
+					$.snackbar({content: 'Sent: ' + payload});
+				}
+
+				// เมื่อกดปุ่ม ON/OFF ของแต่ละสี
+				$('.color-btn').click(function(){
+					var color = $(this).data('color'); // r, g, หรือ b
+					var val = $(this).data('val');     // 255 (ON) หรือ 0 (OFF)
+					
+					// อัปเดตค่าสีเป้าหมาย
+					if (color === 'r') currentR = val;
+					if (color === 'g') currentG = val;
+					if (color === 'b') currentB = val;
+
+					var payload = currentR + "," + currentG + "," + currentB;
+					
+					// เปลี่ยนสีวงกลมและตัวหนังสือหน้าเว็บ
+					$('#color-preview').css('background-color', 'rgb(' + payload + ')');
+					$('#rgb-value').text(payload);
+					
+					// ส่งคำสั่งผ่าน MQTT
+					publishMQTT(payload);
+				});
+            });
+	</script>
+</body>
+</html>
